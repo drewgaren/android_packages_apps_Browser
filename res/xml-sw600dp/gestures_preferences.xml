@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen
+  xmlns:android="http://schemas.android.com/apk/res/android">
+    <ListPreference android:entries="@array/pref_gestures_swipe_right_choices" android:title="@string/pref_gestures_swipe_right" android:key="swipe_right" android:defaultValue="none" android:entryValues="@array/pref_gestures_swipe_right_values" />
+    <com.android.browser.preferences.SeekBarSummaryPreference android:max="4000" android:title="@string/sensitiviy_swipe_right" android:key="sensitivity_swipe_right" android:defaultValue="2000" />
+    <ListPreference android:entries="@array/pref_gestures_swipe_left_choices" android:title="@string/pref_gestures_swipe_left" android:key="swipe_left" android:defaultValue="none" android:entryValues="@array/pref_gestures_swipe_left_values" />
+    <com.android.browser.preferences.SeekBarSummaryPreference android:max="4000" android:title="@string/sensitiviy_swipe_left" android:key="sensitivity_swipe_left" android:defaultValue="2000" />
+</PreferenceScreen>

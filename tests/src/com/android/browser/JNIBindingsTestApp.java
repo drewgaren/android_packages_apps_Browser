@@ -23,6 +23,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.test.ActivityInstrumentationTestCase2;
 import android.util.Log;
+import android.webkit.ClientCertRequestHandler;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
 import android.webkit.SslErrorHandler;
@@ -37,6 +38,9 @@ import java.io.OutputStream;
 /**
  * Adds a JavaScript interface to the webview and calls functions on it to verify variables
  * are passed from JS to Java correctly.
+ * To run this test, execute:
+ * adb shell am instrument -w -e class com.android.browser.JNIBindingsTestApp#testJNIBindings \
+ *     com.android.browser.tests/android.test.InstrumentationTestRunner
  */
 public class JNIBindingsTestApp extends ActivityInstrumentationTestCase2<BrowserActivity> {
 
@@ -47,6 +51,7 @@ public class JNIBindingsTestApp extends ActivityInstrumentationTestCase2<Browser
     private static final int MSG_WEBKIT_DATA_READY = 101;
 
     private BrowserActivity mActivity = null;
+    private Controller mController = null;
     private Instrumentation mInst = null;
 
     private boolean mTestDone = false;
@@ -89,7 +94,7 @@ public class JNIBindingsTestApp extends ActivityInstrumentationTestCase2<Browser
                     }
                 }
             };
-            mWebView.documentAsText(mHandler.obtainMessage(MSG_WEBKIT_DATA_READY));
+            mWebView.documentAsText(mHandler.obtainMessage(MSG_WEBKIT_DATA_READY, 1, 0));
             Looper.loop();
         }
     }
@@ -108,6 +113,7 @@ public class JNIBindingsTestApp extends ActivityInstrumentationTestCase2<Browser
         super.setUp();
 
         mActivity = getActivity();
+        mController = mActivity.getController();
         mInst = getInstrumentation();
         mInst.waitForIdleSync();
 
@@ -144,7 +150,7 @@ public class JNIBindingsTestApp extends ActivityInstrumentationTestCase2<Browser
      * and wrapping the WebView's helper clients.
      */
     void setUpBrowser() {
-        Tab tab = mActivity.getTabControl().getCurrentTab();
+        Tab tab = mController.getTabControl().getCurrentTab();
         WebView webView = tab.getWebView();
         webView.addJavascriptInterface(new JNIBindingsTest(this), "JNIBindingsTest");
 
@@ -215,6 +221,16 @@ public class JNIBindingsTestApp extends ActivityInstrumentationTestCase2<Browser
                 handler.proceed();
             }
 
+            /**
+             * Ignores and logs SSL client certificate requests.
+             */
+            @Override
+            public void onReceivedClientCertRequest(WebView view, ClientCertRequestHandler handler,
+                    String host_and_port) {
+                Log.w(TAG, "SSL client certificate request: " + host_and_port);
+                handler.cancel();
+            }
+
         });
     }
 
@@ -226,7 +242,7 @@ public class JNIBindingsTestApp extends ActivityInstrumentationTestCase2<Browser
     public void testJNIBindings() {
         setUpBrowser();
 
-        Tab tab = mActivity.getTabControl().getCurrentTab();
+        Tab tab = mController.getTabControl().getCurrentTab();
         WebView webView = tab.getWebView();
         webView.loadUrl("file://" + SDCARD_BINDINGS_TEST_HTML);
         synchronized(this) {

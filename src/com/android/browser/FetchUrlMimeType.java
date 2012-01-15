@@ -16,71 +16,67 @@
 
 package com.android.browser;
 
-import android.content.ContentValues;
-import android.net.Uri;
-import android.net.http.AndroidHttpClient;
-
-import org.apache.http.HttpResponse;
 import org.apache.http.Header;
+import org.apache.http.HttpHost;
+import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpHead;
+import org.apache.http.conn.params.ConnRouteParams;
 
-import java.io.IOException;
-
-import android.os.AsyncTask;
-import android.provider.Downloads;
+import android.app.DownloadManager;
+import android.content.Context;
+import android.net.Proxy;
+import android.net.http.AndroidHttpClient;
+import android.os.Environment;
 import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
+
+import java.io.IOException;
 
 /**
  * This class is used to pull down the http headers of a given URL so that
  * we can analyse the mimetype and make any correction needed before we give
- * the URL to the download manager. The ContentValues class holds the
- * content that would be provided to the download manager, so that on
- * completion of checking the mimetype, we can issue the download to
- * the download manager.
+ * the URL to the download manager.
  * This operation is needed when the user long-clicks on a link or image and
  * we don't know the mimetype. If the user just clicks on the link, we will
  * do the same steps of correcting the mimetype down in
  * android.os.webkit.LoadListener rather than handling it here.
  *
  */
-class FetchUrlMimeType extends AsyncTask<ContentValues, String, ContentValues> {
+class FetchUrlMimeType extends Thread {
 
-    BrowserActivity mActivity;
-    ContentValues mValues;
+    private Context mContext;
+    private DownloadManager.Request mRequest;
+    private String mUri;
+    private String mCookies;
+    private String mUserAgent;
 
-    public FetchUrlMimeType(BrowserActivity activity) {
-        mActivity = activity;
+    public FetchUrlMimeType(Context context, DownloadManager.Request request,
+            String uri, String cookies, String userAgent) {
+        mContext = context.getApplicationContext();
+        mRequest = request;
+        mUri = uri;
+        mCookies = cookies;
+        mUserAgent = userAgent;
     }
 
     @Override
-    public ContentValues doInBackground(ContentValues... values) {
-        mValues = values[0];
-
-        // Check to make sure we have a URI to download
-        String uri = mValues.getAsString(Downloads.Impl.COLUMN_URI);
-        if (uri == null || uri.length() == 0) {
-            return null;
-        }
-
+    public void run() {
         // User agent is likely to be null, though the AndroidHttpClient
         // seems ok with that.
-        AndroidHttpClient client = AndroidHttpClient.newInstance(
-                mValues.getAsString(Downloads.Impl.COLUMN_USER_AGENT));
-        HttpHead request = new HttpHead(uri);
-
-        String cookie = mValues.getAsString(Downloads.Impl.COLUMN_COOKIE_DATA);
-        if (cookie != null && cookie.length() > 0) {
-            request.addHeader("Cookie", cookie);
+        AndroidHttpClient client = AndroidHttpClient.newInstance(mUserAgent);
+        HttpHost httpHost = Proxy.getPreferredHttpHost(mContext, mUri);
+        if (httpHost != null) {
+            ConnRouteParams.setDefaultProxy(client.getParams(), httpHost);
         }
+        HttpHead request = new HttpHead(mUri);
 
-        String referer = mValues.getAsString(Downloads.Impl.COLUMN_REFERER);
-        if (referer != null && referer.length() > 0) {
-            request.addHeader("Referer", referer);
+        if (mCookies != null && mCookies.length() > 0) {
+            request.addHeader("Cookie", mCookies);
         }
 
         HttpResponse response;
-        ContentValues result = new ContentValues();
+        String mimeType = null;
+        String contentDisposition = null;
         try {
             response = client.execute(request);
             // We could get a redirect here, but if we do lets let
@@ -89,16 +85,15 @@ class FetchUrlMimeType extends AsyncTask<ContentValues, String, ContentValues> {
             if (response.getStatusLine().getStatusCode() == 200) {
                 Header header = response.getFirstHeader("Content-Type");
                 if (header != null) {
-                    String mimeType = header.getValue();
+                    mimeType = header.getValue();
                     final int semicolonIndex = mimeType.indexOf(';');
                     if (semicolonIndex != -1) {
                         mimeType = mimeType.substring(0, semicolonIndex);
                     }
-                    result.put("Content-Type", mimeType);
                 }
                 Header contentDispositionHeader = response.getFirstHeader("Content-Disposition");
                 if (contentDispositionHeader != null) {
-                    result.put("Content-Disposition", contentDispositionHeader.getValue());
+                    contentDisposition = contentDispositionHeader.getValue();
                 }
             }
         } catch (IllegalArgumentException ex) {
@@ -109,32 +104,25 @@ class FetchUrlMimeType extends AsyncTask<ContentValues, String, ContentValues> {
             client.close();
         }
 
-        return result;
-    }
-
-   @Override
-    public void onPostExecute(ContentValues values) {
-       final String mimeType = values.getAsString("Content-Type");
-       final String contentDisposition = values.getAsString("Content-Disposition");
        if (mimeType != null) {
-           String url = mValues.getAsString(Downloads.Impl.COLUMN_URI);
            if (mimeType.equalsIgnoreCase("text/plain") ||
                    mimeType.equalsIgnoreCase("application/octet-stream")) {
                String newMimeType =
                        MimeTypeMap.getSingleton().getMimeTypeFromExtension(
-                           MimeTypeMap.getFileExtensionFromUrl(url));
+                           MimeTypeMap.getFileExtensionFromUrl(mUri));
                if (newMimeType != null) {
-                   mValues.put(Downloads.Impl.COLUMN_MIME_TYPE, newMimeType);
+                   mRequest.setMimeType(newMimeType);
                }
            }
-           String filename = URLUtil.guessFileName(url,
-                   contentDisposition, mimeType);
-           mValues.put(Downloads.Impl.COLUMN_FILE_NAME_HINT, filename);
+           String filename = URLUtil.guessFileName(mUri, contentDisposition,
+                mimeType);
+           mRequest.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, filename);
        }
 
        // Start the download
-       final Uri contentUri =
-           mActivity.getContentResolver().insert(Downloads.Impl.CONTENT_URI, mValues);
+       DownloadManager manager = (DownloadManager) mContext.getSystemService(
+               Context.DOWNLOAD_SERVICE);
+       manager.enqueue(mRequest);
     }
 
 }
